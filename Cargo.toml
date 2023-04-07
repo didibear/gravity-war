@@ -11,3 +11,4 @@ bevy-inspector-egui = "0.18.1"
 bevy_prototype_debug_lines = "0.10.1"
 bevy_rapier2d = { version = "0.21.0", features = ["wasm-bindgen"] }
 itertools = "0.10.5"
+rand = { version = "0.8.5", features = ["small_rng"] }

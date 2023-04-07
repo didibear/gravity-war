@@ -1,6 +1,7 @@
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
+    sprite::MaterialMesh2dBundle,
     utils::{HashMap, HashSet},
     window::{close_on_esc, PresentMode},
 };
@@ -10,6 +11,9 @@ use bevy_rapier2d::prelude::*;
 use itertools::Itertools;
 
 use bevy_prototype_debug_lines::*;
+use rand::rngs::SmallRng;
+use rand::Rng;
+use rand::SeedableRng;
 
 fn main() {
     App::new()
@@ -30,7 +34,7 @@ fn main() {
         .init_resource::<Configuration>() // `ResourceInspectorPlugin` won't initialize the resource
         .register_type::<Configuration>() // you need to register your type to display it
         .add_plugin(ResourceInspectorPlugin::<Configuration>::default())
-        .add_startup_systems((setup_graphics,))
+        .add_startup_systems((setup_graphics, spawn_stars))
         .add_systems((
             update_targets,
             apply_forces.after(update_targets),
@@ -237,4 +241,27 @@ fn camera_follow_spaceships(
     let mut camera_transform = camera.single_mut();
     camera_transform.translation.x = avg_translation.x;
     camera_transform.translation.y = avg_translation.y;
+}
+
+fn spawn_stars(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    let mut rng = SmallRng::seed_from_u64(42);
+
+    let mesh = meshes.add(shape::Circle::new(1.).into());
+    let material = materials.add(ColorMaterial::from(Color::WHITE));
+
+    for _ in 0..100 {
+        let x = rng.gen_range(-1000.0..1000.0);
+        let y = rng.gen_range(-1000.0..1000.0);
+
+        commands.spawn(MaterialMesh2dBundle {
+            mesh: mesh.clone().into(),
+            material: material.clone(),
+            transform: Transform::from_translation(Vec3::new(x, y, 0.)),
+            ..default()
+        });
+    }
 }
