@@ -34,6 +34,7 @@ fn main() {
         .add_systems((
             update_targets,
             apply_forces.after(update_targets),
+            camera_follow_spaceships,
             close_on_esc,
             move_spaceship,
             spawn_by_click,
@@ -219,4 +220,21 @@ fn spaceship_bundle(faction: u32, x: f32, y: f32) -> impl Bundle {
         },
         TransformBundle::from(Transform::from_xyz(x, y, 0.0)),
     )
+}
+
+fn camera_follow_spaceships(
+    mut camera: Query<&mut Transform, With<Camera>>,
+    spaceships: Query<&Transform, (With<Spaceship>, Without<Camera>)>,
+) {
+    let count = spaceships.iter().len();
+    if count == 0 {
+        return;
+    }
+
+    let translations = spaceships.iter().map(|t| t.translation.truncate());
+    let avg_translation = translations.sum::<Vec2>() / count as f32;
+
+    let mut camera_transform = camera.single_mut();
+    camera_transform.translation.x = avg_translation.x;
+    camera_transform.translation.y = avg_translation.y;
 }
