@@ -27,14 +27,13 @@ fn main() {
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(LogDiagnosticsPlugin::default())
         .insert_resource(ClearColor(Color::BLACK))
-        .insert_resource(Spaceships::default())
         .init_resource::<Configuration>() // `ResourceInspectorPlugin` won't initialize the resource
         .register_type::<Configuration>() // you need to register your type to display it
         .add_plugin(ResourceInspectorPlugin::<Configuration>::default())
         .add_startup_systems((setup_graphics,))
         .add_systems((
-            apply_forces,
-            update_factions,
+            update_targets,
+            apply_forces.after(update_targets),
             close_on_esc,
             move_spaceship,
             spawn_by_click,
@@ -65,6 +64,12 @@ impl Default for Configuration {
 #[derive(Component, Default)]
 struct Spaceship;
 
+#[derive(Component, Default)]
+struct Target {
+    translation: Vec3,
+    distance: f32,
+}
+
 #[derive(Component, Hash, Clone, Copy, PartialEq, Eq)]
 struct Faction(pub u32);
 
@@ -85,27 +90,8 @@ fn setup_graphics(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-#[derive(Resource, Default)]
-struct Spaceships {
-    by_faction: HashMap<Faction, HashSet<Entity>>,
-}
-
-impl Spaceships {
-    fn _in_other_factions(&self, current_faction: Faction) -> impl Iterator<Item = Entity> + '_ {
-        self.by_faction
-            .iter()
-            .filter(move |(faction, _)| **faction != current_faction)
-            .flat_map(|(_, entities)| entities.iter().copied())
-    }
-}
-
-fn apply_forces(
-    mut spaceship_forces: Query<(&Faction, &Transform, &mut ExternalForce), With<Spaceship>>,
-    mut lines: ResMut<DebugLines>,
-    _spaceships: Res<Spaceships>,
-    configs: Res<Configuration>,
-) {
-    let spaceships_by_faction: HashMap<Faction, Vec<Vec3>> = spaceship_forces
+fn update_targets(mut targets: Query<(&Faction, &Transform, &mut Target)>) {
+    let targets_by_faction: HashMap<Faction, Vec<Vec3>> = targets
         .iter()
         .group_by(|(faction, ..)| **faction)
         .into_iter()
@@ -119,52 +105,48 @@ fn apply_forces(
         })
         .collect();
 
-    for (faction, transform, mut ext_force) in spaceship_forces.iter_mut() {
-        if let Some((&closest_target, _target_distance)) = spaceships_by_faction
+    for (faction, transform, mut target) in targets.iter_mut() {
+        if let Some((&closest_target, target_distance)) = targets_by_faction
             .iter()
             .filter(|(target_faction, _)| *target_faction != faction)
             .flat_map(|(_, translations)| translations)
             .map(|target| (target, target.distance(transform.translation)))
             .min_by(|(_, a_distance), (_, b_distance)| a_distance.total_cmp(b_distance))
         {
-            let target_direction = closest_target - transform.translation;
-            let direction = transform.up();
-
-            let angle = direction
-                .truncate()
-                .angle_between(target_direction.truncate());
-
-            ext_force.torque =
-                (angle * configs.rotation_force).clamp(-configs.rotation_max, configs.rotation_max);
-            ext_force.force = (direction * configs.propulsion_force)
-                .truncate()
-                // .clamp_length_min(target_distance )
-                ;
-
-            let pos = transform.translation;
-            lines.line_colored(pos, pos + direction * 100., 0., Color::from(*faction));
-            // lines.line_colored(pos, pos + target_direction * 0.1, 0., Color::YELLOW);
+            *target = Target {
+                translation: closest_target,
+                distance: target_distance,
+            };
         }
     }
 }
 
-fn update_factions(
-    mut spaceships: ResMut<Spaceships>,
-    added: Query<(Entity, &Faction), Added<Faction>>,
-    mut removed: RemovedComponents<Faction>,
+fn apply_forces(
+    mut spaceship_forces: Query<
+        (&Faction, &Target, &Transform, &mut ExternalForce),
+        With<Spaceship>,
+    >,
+    mut lines: ResMut<DebugLines>,
+    configs: Res<Configuration>,
 ) {
-    for (entity, faction) in added.iter() {
-        spaceships
-            .by_faction
-            .entry(*faction)
-            .or_default()
-            .insert(entity);
-    }
+    for (faction, target, transform, mut ext_force) in spaceship_forces.iter_mut() {
+        let target_direction = target.translation - transform.translation;
+        let direction = transform.up();
 
-    for entity in removed.iter() {
-        for entities in spaceships.by_faction.values_mut() {
-            entities.remove(&entity);
-        }
+        let angle = direction
+            .truncate()
+            .angle_between(target_direction.truncate());
+
+        ext_force.torque =
+            (angle * configs.rotation_force).clamp(-configs.rotation_max, configs.rotation_max);
+        ext_force.force = (direction * configs.propulsion_force)
+                .truncate()
+                // .clamp_length_min(target_distance )
+                ;
+
+        let pos = transform.translation;
+        lines.line_colored(pos, pos + direction * 100., 0., Color::from(*faction));
+        // lines.line_colored(pos, pos + target_direction * 0.1, 0., Color::YELLOW);
     }
 }
 
@@ -221,11 +203,13 @@ fn spawn_by_click(
 
 fn spaceship_bundle(faction: u32, x: f32, y: f32) -> impl Bundle {
     (
-        Spaceship::default(),
+        Spaceship,
         Faction(faction),
+        Target::default(),
+        // Physic
         RigidBody::Dynamic,
-        Collider::cuboid(10., 30.),
         Sensor,
+        Collider::cuboid(10., 30.),
         Restitution::coefficient(0.7),
         ExternalForce::default(),
         GravityScale(0.),
